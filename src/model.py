@@ -1,4 +1,5 @@
-from typing import Optional, List, Iterable
+from typing import Optional, List, Iterable, Protocol
+import abc
 
 import weakref
 import datetime
@@ -46,6 +47,136 @@ class Sample:
 
     def matches(self) -> bool:
         return self.species == self.classification
+
+class Distance:
+    """A distance computation"""
+    def distance(self, s1: Sample, s2: Sample) -> float:
+        raise NotImplementedError
+
+class Chebyshev(Distance):
+    def distance(self, s1: Sample, s2: Sample) -> float:
+        return max(
+                [
+                    abs(s1.sepal_length - s2.sepal_length),
+                    abs(s1.sepal_width - s2.sepal_width),
+                    abs(s1.petal_length - s2.petal_length),
+                    abs(s1.petal_width - s2.petal_width),
+                ]
+                )
+
+class Minkowski(Distance):
+    """An abstraction to provide a way to implement Manhattan and Euclidean."""
+    m: int
+
+    def distance(self, s1: Sample, s2: Sample) -> float:
+        return (
+                sum(
+                    [
+                        abs(s1.sepal_length - s2.sepal_length) ** self.m,
+                        abs(s1.sepal_width - s2.sepal_width) ** self.m,
+                        abs(s1.petal_length - s2.petal_length) ** self.m,
+                        abs(s1.petal_width - s2.petal_width) ** self.m,
+                    ]
+                )
+                ** (1 / self.m)
+                )
+
+class Euclidean(Minkowski):
+    m = 2
+
+class Mahattan(Minkowski):
+    m = 1
+
+class Sorensen(Distance):
+    def distance(self, s1: Sample, s2: Sample) -> float:
+        return sum(
+                [
+                    abs(s1.sepal_length - s2.sepal_length),
+                    abs(s1.sepal_width - s2.sepal_width),
+                    abs(s1.petal_length - s2.petal_length),
+                    abs(s1.petal_width - s2.petal_width),
+                ]
+                ) / sum (
+                [
+                    s1.sepal_length + s2.sepal_length,
+                    s1.sepal_width + s2.sepal_width,
+                    s1.petal_length + s2.petal_length,
+                    s1.petal_width + s2.petal_width,
+                ]
+                )
+
+## class Reduce_Function(Protocol):
+##     """Define a callable object with specific parameters."""
+##     def __call__(self, values: list[float]) -> float:
+##         pass
+## 
+## class Minkowski_2(Distance):
+##     """A generic way to implement Manhattan, Euclidean, and Chebyshev."""
+##     m: int
+##     reduction: Reduce_Function
+##     def distance(self, s1: Sample, s2: Sample) -> float:
+##         # Required to prevent Python from passing `self` as the first argument.
+##         summarize = self.reduction
+##         return (
+##             summarize(
+##                 [
+##                     abs(s1.sepal_length - s2.sepal_length) ** self.m,
+##                     abs(s1.sepal_width - s2.sepal_width) ** self.m,
+##                     abs(s1.petal_length - s2.petal_length) ** self.m,
+##                     abs(s1.petal_width - s2.petal_width) ** self.m,
+##                 ]
+##             )
+##             ** (1 / self.m)
+##         )
+## 
+## class ED2S(Minkowski_2):
+##     m = 2
+##     reduction = sum
+
+class Minkowski_2(Distance):
+    @property
+    @abc.abstractmethod
+    def m(self) -> int:
+        ...
+
+    @staticmethod
+    @abc.abstractstaticmethod
+    def reduction(values: Iterable[float]) -> float:
+        ...
+
+    def distance(self, s1: Sample, s2: Sample) -> float:
+        return (
+            self.reduction(
+                [
+                    abs(s1.sepal_length - s2.sepal_length) ** self.m,
+                    abs(s1.sepal_width - s2.sepal_width) ** self.m,
+                    abs(s1.petal_length - s2.petal_length) ** self.m,
+                    abs(s1.petal_width - s2.petal_width) ** self.m,
+                ]
+            )
+            ** (1 / self.m)
+        )
+
+class CD2(Minkowski_2):
+    m = 1
+    
+    @staticmethod
+    def reduction(values: Iterable[float]) -> float:
+        return max(values)
+
+class MD2(Minkowski_2):
+    m = 1
+
+    @staticmethod
+    def reduction(values: Iterable[float]) -> float:
+        return sum(values)
+
+class ED2(Minkowski_2):
+    m = 2
+
+    @staticmethod
+    def reduction(values: Iterable[float]) -> float:
+        return sum(values)
 
 class Hyperparameter:
     """
