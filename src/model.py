@@ -1,5 +1,13 @@
-from typing import Optional, List, Iterable, Protocol
+from typing import (
+        Optional,
+        List,
+        Iterable,
+        Protocol,
+        Tuple,
+        List,
+        Counter)
 import abc
+import collections
 
 import weakref
 import datetime
@@ -182,8 +190,9 @@ class Hyperparameter:
     """
     A hyperparameter value and the overall quality of the classification.
     """
-    def __init__(self, k: int, training: "TrainingData") -> None:
+    def __init__(self, k: int, training: "TrainingData", algorithm: "Distance") -> None:
         self.k = k
+        self.algorithm = algorithm
         self.data: weakref.ReferenceType["TrainingData"] = weakref.ref(training)
         self.quality: float
 
@@ -203,7 +212,18 @@ class Hyperparameter:
 
     def classify(self, sample: Sample) -> str:
         """TODO: the k-NN algorithm"""
-        return ''
+        training_data = self.data()
+        if not training_data:
+            raise RuntimeError("No TrainingData object")
+        distances: List[Tuple[float, Sample]] = sorted(
+                (self.algorithm.distance(sample, known), known)
+                for known in training_data.training
+        )
+        k_nearest = (known.species for d, known in distances[:self.k])
+        frequency: Counter[str] = collections.Counter(k_nearest) # type: ignore [arg-type]
+        best_fit, *others = frequency.most_common()
+        species, votes = best_fit
+        return species
 
 class TrainingData:
     """
@@ -217,7 +237,7 @@ class TrainingData:
         self.testing: List[Sample] = []
         self.tuning: List[Hyperparameter] = []
 
-    def load(
+    def  load(
             self,
             raw_data_source: Iterable[dict[str,str]]
             ) -> None:
