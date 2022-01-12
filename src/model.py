@@ -1,4 +1,5 @@
 from typing import (
+        cast,
         Optional,
         List,
         Iterable,
@@ -12,49 +13,210 @@ import collections
 import weakref
 import datetime
 
+class InvalidSampleError(ValueError):
+    """Source data file has invalid data representation"""
+
+
+## class Sample:
+##     def __init__(
+##             self,
+##             sepal_length: float,
+##             sepal_width: float,
+##             petal_length: float,
+##             petal_width: float,
+##             species: Optional[str] = None
+##     ) -> None:
+##         self.sepal_length = sepal_length
+##         self.sepal_width = sepal_width
+##         self.petal_length = petal_length
+##         self.petal_width = petal_width
+##         self.species = species
+##         self.classification: Optional[str] = None
+## 
+##     def __repr__(self) -> str:
+##         if self.species is None:
+##             known_unknown = "UnknownSample"
+##         else:
+##             known_unknown = "KnownSample"
+##         if self.classification is None:
+##             classification = ""
+##         else:
+##             classification = f", classification={self.classification!r}"
+## 
+##         return (
+##                 f"{known_unknown}("
+##                 f"sepal_length={self.sepal_length}, "
+##                 f"sepal_width={self.sepal_width}, "
+##                 f"petal_length={self.petal_length}, "
+##                 f"petal_width={self.petal_width}, "
+##                 f"species={self.species!r}"
+##                 f"{classification}"
+##                 f")"
+##         )
+## 
+##     def classify(self, classification: str) -> None:
+##         self.classification = classification
+## 
+##     def matches(self) -> bool:
+##         return self.species == self.classification
 
 class Sample:
+    """Abstract superclass for all samples."""
     def __init__(
             self,
             sepal_length: float,
             sepal_width: float,
             petal_length: float,
             petal_width: float,
-            species: Optional[str] = None
     ) -> None:
         self.sepal_length = sepal_length
         self.sepal_width = sepal_width
         self.petal_length = petal_length
         self.petal_width = petal_width
-        self.species = species
-        self.classification: Optional[str] = None
 
     def __repr__(self) -> str:
-        if self.species is None:
-            known_unknown = "UnknownSample"
-        else:
-            known_unknown = "KnownSample"
-        if self.classification is None:
-            classification = ""
-        else:
-            classification = f", classification={self.classification!r}"
-
         return (
-                f"{known_unknown}("
+                f"{self.__class__.__name__}("
+                f"sepal_legnth={self.sepal_length}, "
+                f"sepal_width={self.sepal_width}, "
+                f"petal_length={self.petal_length}, "
+                f"petal_width={self.petal_width}, "
+                f")"
+        )
+
+class KnownSample(Sample):
+    """Abstract superclass for testing and training data, the sepcies is set externally."""
+    def __init__(
+            self,
+            species: str,
+            sepal_length: float,
+            sepal_width: float,
+            petal_length: float,
+            petal_width: float,
+    ) -> None:
+        super().__init__(
+                sepal_length=sepal_length,
+                sepal_width=sepal_width,
+                petal_length=petal_length,
+                petal_width=petal_width,
+        )
+        self.species = species
+
+    def __repr__(self) -> str:
+        return (
+                f"{self.__class__.__name__}("
                 f"sepal_length={self.sepal_length}, "
                 f"sepal_width={self.sepal_width}, "
                 f"petal_length={self.petal_length}, "
                 f"petal_width={self.petal_width}, "
                 f"species={self.species!r}"
-                f"{classification}"
                 f")"
         )
 
-    def classify(self, classification: str) -> None:
+    @classmethod
+    def from_dict(cls, row: dict[str, str]) -> "KnownSample":
+        if row["species"] not in {"Iris-setosa", "Iris-versicolour", "Iris-virginica"}:
+            raise InvalidSampleError(f"invalid species in {row!r}")
+        try:
+            return cls(
+                    species=row['species'],
+                    sepal_length=float(row['sepal_length']),
+                    sepal_width=float(row['sepal_width']),
+                    petal_length=float(row['petal_length']),
+                    petal_width=float(row['petal_width']),
+            )
+        except ValueError as ex:
+            raise InvalidSampleError(f"invalid {row!r}")
+
+class TrainingKnownSample(KnownSample):
+    """Training data."""
+    @classmethod
+    def from_dict(cls, row: dict[str, str]) -> "TrainingKnownSample":
+        return cast(TrainingKnownSample, super().from_dict(row))
+
+class TestingKnownSample(KnownSample):
+    """
+    Testing data. A classifier can assign a species, which may or may not be correct.
+    """
+    def __init__(
+            self,
+            species: str,
+            sepal_length: float,
+            sepal_width: float,
+            petal_length: float,
+            petal_width: float,
+            classification: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+                species=species,
+                sepal_length=sepal_length,
+                sepal_width=sepal_width,
+                petal_length=petal_length,
+                petal_width=petal_width,
+        )
         self.classification = classification
 
     def matches(self) -> bool:
         return self.species == self.classification
+
+    def __repr__(self) -> str:
+        return (
+                f"{self.__class__.__name__}("
+                f"sepal_length={self.sepal_length}, "
+                f"sepal_width={self.sepal_width}, "
+                f"petal_length={self.petal_length}, "
+                f"petal_width={self.petal_width}, "
+                f"species={self.species!r}, "
+                f"classification={self.classification!r}, "
+                f")"
+        )
+
+
+    @classmethod
+    def from_dict(cls, row: dict[str, str]) -> "TestingKnownSample":
+        return cast(TestingKnownSample, super().from_dict(row))
+
+class UnknownSample(Sample):
+    """A sample provided by a User, not yet classifier."""
+    @classmethod
+    def from_dict(cls, row: dict[str, str]) -> "UnknownSample":
+        if set(row.keys()) != {"sepal_length", "sepal_width", "petal_length", "petal_width"}:
+            raise InvalidSampleError(f"invalid fields in {row!r}")
+        try:
+            return cls(
+                    sepal_length=float(row["sepal_length"]),
+                    sepal_width=float(row["sepal_width"]),
+                    petal_length=float(row["petal_length"]),
+                    petal_width=float(row["petal_width"]),
+            )
+        except (ValueError, KeyError) as ex:
+            raise InvalidSampleError(f"invalid {row!r}")
+
+class ClassifiedSample(Sample):
+    """Created from a sample provided by a User, and the results of classification."""
+    def __init__(
+            self,
+            classification: str,
+            sample: UnknownSample
+    ) -> None:
+        super().__init__(
+                sepal_length=sample.sepal_length,
+                sepal_width=sample.sepal_width,
+                petal_length=sample.petal_length,
+                petal_width=sample.petal_width,
+        )
+        self.classification = classification
+
+    def __repr__(self) -> str:
+        return (
+                f"{self.__class__.__name__}("
+                f"sepal_length={self.sepal_length}, "
+                f"sepal_width={self.sepal_width}, "
+                f"petal_length={self.petal_length}, "
+                f"petal_width={self.petal_width}, "
+                f"classification={self.classification!r}, "
+                f")"
+        )
 
 class Distance:
     """A distance computation"""
@@ -215,12 +377,12 @@ class Hyperparameter:
         training_data = self.data()
         if not training_data:
             raise RuntimeError("No TrainingData object")
-        distances: List[Tuple[float, Sample]] = sorted(
+        distances: List[Tuple[float, TrainingKnownSample]] = sorted(
                 (self.algorithm.distance(sample, known), known)
                 for known in training_data.training
         )
         k_nearest = (known.species for d, known in distances[:self.k])
-        frequency: Counter[str] = collections.Counter(k_nearest) # type: ignore [arg-type]
+        frequency: Counter[str] = collections.Counter(k_nearest)
         best_fit, *others = frequency.most_common()
         species, votes = best_fit
         return species
@@ -233,27 +395,44 @@ class TrainingData:
         self.name = name
         self.uploaded: datetime.datetime
         self.tested: datetime.datetime
-        self.training: List[Sample] = []
-        self.testing: List[Sample] = []
+        self.training: List[TrainingKnownSample] = []
+        self.testing: List[TestingKnownSample] = []
         self.tuning: List[Hyperparameter] = []
 
-    def  load(
+    ## def  load(
+    ##         self,
+    ##         raw_data_source: Iterable[dict[str,str]]
+    ##         ) -> None:
+    ##     """Load and partition the raw data"""
+    ##     for n, row in enumerate(raw_data_source):
+    ##         sample = Sample(
+    ##                 sepal_length=float(row["sepal_length"]),
+    ##                 sepal_width=float(row["sepal_width"]),
+    ##                 petal_length=float(row["petal_length"]),
+    ##                 petal_width=float(row["petal_width"]),
+    ##                 species=row["species"],
+    ##                 )
+    ##         if n % 5 == 0:
+    ##             self.testing.append(sample)
+    ##         else:
+    ##             self.training.append(sample)
+    ##     self.uploaded = datetime.datetime.now(tz=datetime.timezone.utc)
+    def load(
             self,
-            raw_data_source: Iterable[dict[str,str]]
-            ) -> None:
-        """Load and partition the raw data"""
-        for n, row in enumerate(raw_data_source):
-            sample = Sample(
-                    sepal_length=float(row["sepal_length"]),
-                    sepal_width=float(row["sepal_width"]),
-                    petal_length=float(row["petal_length"]),
-                    petal_width=float(row["petal_width"]),
-                    species=row["species"],
-                    )
-            if n % 5 == 0:
-                self.testing.append(sample)
-            else:
-                self.training.append(sample)
+            raw_data_iter: Iterable[dict[str, str]]
+    ) -> None:
+        """Extract TestingKnownSample and TrainingKnownSample from raw data"""
+        for n, row in enumerate(raw_data_iter):
+            try:
+                if n % 5 == 0:
+                    test = TestingKnownSample.from_dict(row)
+                    self.testing.append(test)
+                else:
+                    train = TrainingKnownSample.from_dict(row)
+                    self.training.append(train)
+            except InvalidSampleError as ex:
+                print(f"Row {n+1}: {ex}")
+                return
         self.uploaded = datetime.datetime.now(tz=datetime.timezone.utc)
 
     def test(
@@ -264,11 +443,19 @@ class TrainingData:
         self.tuning.append(parameter)
         self.tested = datetime.datetime.now(tz=datetime.timezone.utc)
 
+    ## def classify(
+    ##         self,
+    ##         parameter: Hyperparameter,
+    ##         sample: Sample) -> Sample:
+    ##     """Classify this Sample."""
+    ##     classification = parameter.classify(sample)
+    ##     sample.classify(classification)
+    ##     return sample
     def classify(
             self,
             parameter: Hyperparameter,
-            sample: Sample) -> Sample:
-        """Classify this Sample."""
-        classification = parameter.classify(sample)
-        sample.classify(classification)
-        return sample
+            sample: UnknownSample
+    ) -> ClassifiedSample:
+        return ClassifiedSample(
+                classification=parameter.classify(sample), sample=sample
+        )
