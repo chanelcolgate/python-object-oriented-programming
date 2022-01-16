@@ -422,6 +422,7 @@ class TrainingData:
             raw_data_iter: Iterable[dict[str, str]]
     ) -> None:
         """Extract TestingKnownSample and TrainingKnownSample from raw data"""
+        bad_count = 0
         for n, row in enumerate(raw_data_iter):
             try:
                 if n % 5 == 0:
@@ -432,7 +433,10 @@ class TrainingData:
                     self.training.append(train)
             except InvalidSampleError as ex:
                 print(f"Row {n+1}: {ex}")
-                return
+                bad_count += 1
+        if bad_count != 0:
+            print(f"{bad_count} invalid rows")
+            return
         self.uploaded = datetime.datetime.now(tz=datetime.timezone.utc)
 
     def test(
