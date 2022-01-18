@@ -1,4 +1,5 @@
 from typing import (
+        Iterator,
         cast,
         Optional,
         List,
@@ -7,14 +8,18 @@ from typing import (
         Tuple,
         List,
         Counter)
+from pathlib import Path
 import abc
 import collections
+import csv
+import enum
 
 import weakref
 import datetime
 
 class InvalidSampleError(ValueError):
     """Source data file has invalid data representation"""
+    pass
 
 
 ## class Sample:
@@ -74,21 +79,44 @@ class Sample:
         self.petal_length = petal_length
         self.petal_width = petal_width
 
-    def __repr__(self) -> str:
-        return (
-                f"{self.__class__.__name__}("
-                f"sepal_legnth={self.sepal_length}, "
-                f"sepal_width={self.sepal_width}, "
-                f"petal_length={self.petal_length}, "
-                f"petal_width={self.petal_width}, "
-                f")"
+    ## def __repr__(self) -> str:
+    ##     return (
+    ##             f"{self.__class__.__name__}("
+    ##             f"sepal_legnth={self.sepal_length}, "
+    ##             f"sepal_width={self.sepal_width}, "
+    ##             f"petal_length={self.petal_length}, "
+    ##             f"petal_width={self.petal_width}, "
+    ##             f")"
+    ##     )
+
+    @property
+    def attr_dict(self) -> dict[str, str]:
+        return dict(
+                sepal_length=f"{self.sepal_length!r}",
+                sepal_width=f"{self.sepal_width!r}",
+                petal_length=f"{self.petal_length!r}",
+                petal_width=f"{self.petal_width!r}",
         )
 
+    def __repr__(self) -> str:
+        base_attributes = self.attr_dict
+        attrs = ", ".join(f"{k}={v}" for k, v in base_attributes.items())
+        return f"{self.__class__.__name__}({attrs})"
+
+class Purpose(enum.IntEnum):
+    Classification = 0
+    Testing = 1
+    Training = 2
+
 class KnownSample(Sample):
-    """Abstract superclass for testing and training data, the sepcies is set externally."""
+    """
+    Represents a sample of testing or training data, the species is set once
+    The purpose determines if it can or cannot be classified
+    """
     def __init__(
             self,
             species: str,
+            purpose: int,
             sepal_length: float,
             sepal_width: float,
             petal_length: float,
@@ -101,96 +129,68 @@ class KnownSample(Sample):
                 petal_width=petal_width,
         )
         self.species = species
+        purpose_enum = Purpose(purpose)
+        if purpose_enum not in {Purpose.Training, Purpose.Testing}:
+            raise ValueError(f"invalid prupose: {purpose!r}: {purpose_enum}")
+        self.purpose = purpose_enum
+        self._classification: Optional[str] = None
+
+    def matches(self) -> bool:
+        return self.species == self.classification
+
+    @property
+    def classification(self) -> Optional[str]:
+        if self.purpose == Purpose.Testing:
+            return self._classification
+        else:
+            raise AttributeError(f"Training samples have no classification")
+
+    @classification.setter
+    def classification(self, value: str) -> None:
+        if self.purpose == Purpose.Testing:
+            self._classification = value
+        else:
+            raise AttributeError(f"Training samples cannot be classified")
 
     def __repr__(self) -> str:
-        return (
-                f"{self.__class__.__name__}("
-                f"sepal_length={self.sepal_length}, "
-                f"sepal_width={self.sepal_width}, "
-                f"petal_length={self.petal_length}, "
-                f"petal_width={self.petal_width}, "
-                f"species={self.species!r}"
-                f")"
-        )
+        base_attributes = self.attr_dict
+        base_attributes["purpose"] = f"{self.purpose.value}"
+        base_attributes["species"] = f"{self.species!r}"
+        if self.purpose == Purpose.Testing and self._classification:
+            base_attributes["classification"] = f"{self.classification!r}"
+        attrs = ", ".join(f"{k}={v}" for k, v in base_attributes.items())
+        return f"{self.__class__.__name__}({attrs})"
 
-    @classmethod
-    def from_dict(cls, row: dict[str, str]) -> "KnownSample":
-        if row["species"] not in {"Iris-setosa", "Iris-versicolour", "Iris-virginica"}:
-            raise InvalidSampleError(f"invalid species in {row!r}")
-        try:
-            return cls(
-                    species=row['species'],
-                    sepal_length=float(row['sepal_length']),
-                    sepal_width=float(row['sepal_width']),
-                    petal_length=float(row['petal_length']),
-                    petal_width=float(row['petal_width']),
-            )
-        except ValueError as ex:
-            raise InvalidSampleError(f"invalid {row!r}")
-
-class TrainingKnownSample(KnownSample):
-    """Training data."""
-    @classmethod
-    def from_dict(cls, row: dict[str, str]) -> "TrainingKnownSample":
-        return cast(TrainingKnownSample, super().from_dict(row))
-
-class TestingKnownSample(KnownSample):
-    """
-    Testing data. A classifier can assign a species, which may or may not be correct.
-    """
+class UnknownSample(Sample):
+    """A sample provided by a User, not yet classifier."""
     def __init__(
             self,
-            species: str,
             sepal_length: float,
             sepal_width: float,
             petal_length: float,
             petal_width: float,
-            classification: Optional[str] = None,
     ) -> None:
         super().__init__(
-                species=species,
                 sepal_length=sepal_length,
                 sepal_width=sepal_width,
                 petal_length=petal_length,
                 petal_width=petal_width,
         )
-        self.classification = classification
+        self._classification: Optional[str] = None
 
-    def matches(self) -> bool:
-        return self.species == self.classification
+    @property
+    def classification(self) -> Optional[str]:
+        return self._classification
+
+    @classification.setter
+    def classification(self, value: str) -> None:
+        self._classification = value
 
     def __repr__(self) -> str:
-        return (
-                f"{self.__class__.__name__}("
-                f"sepal_length={self.sepal_length}, "
-                f"sepal_width={self.sepal_width}, "
-                f"petal_length={self.petal_length}, "
-                f"petal_width={self.petal_width}, "
-                f"species={self.species!r}, "
-                f"classification={self.classification!r}, "
-                f")"
-        )
-
-
-    @classmethod
-    def from_dict(cls, row: dict[str, str]) -> "TestingKnownSample":
-        return cast(TestingKnownSample, super().from_dict(row))
-
-class UnknownSample(Sample):
-    """A sample provided by a User, not yet classifier."""
-    @classmethod
-    def from_dict(cls, row: dict[str, str]) -> "UnknownSample":
-        if set(row.keys()) != {"sepal_length", "sepal_width", "petal_length", "petal_width"}:
-            raise InvalidSampleError(f"invalid fields in {row!r}")
-        try:
-            return cls(
-                    sepal_length=float(row["sepal_length"]),
-                    sepal_width=float(row["sepal_width"]),
-                    petal_length=float(row["petal_length"]),
-                    petal_width=float(row["petal_width"]),
-            )
-        except (ValueError, KeyError) as ex:
-            raise InvalidSampleError(f"invalid {row!r}")
+        base_attributes = self.attr_dict
+        base_attributes["classification"] = f"{self.classification!r}"
+        attrs = ", ".join(f"{k}={v}" for k, v in base_attributes.items())
+        return f"{self.__class__.__name__}({attrs})"
 
 class ClassifiedSample(Sample):
     """Created from a sample provided by a User, and the results of classification."""
@@ -377,7 +377,7 @@ class Hyperparameter:
         training_data = self.data()
         if not training_data:
             raise RuntimeError("No TrainingData object")
-        distances: List[Tuple[float, TrainingKnownSample]] = sorted(
+        distances: List[Tuple[float, KnownSample]] = sorted(
                 (self.algorithm.distance(sample, known), known)
                 for known in training_data.training
         )
@@ -395,48 +395,51 @@ class TrainingData:
         self.name = name
         self.uploaded: datetime.datetime
         self.tested: datetime.datetime
-        self.training: List[TrainingKnownSample] = []
-        self.testing: List[TestingKnownSample] = []
+        self.training: List[KnownSample] = []
+        self.testing: List[KnownSample] = []
         self.tuning: List[Hyperparameter] = []
 
-    ## def  load(
+    ## def load(
     ##         self,
-    ##         raw_data_source: Iterable[dict[str,str]]
-    ##         ) -> None:
-    ##     """Load and partition the raw data"""
-    ##     for n, row in enumerate(raw_data_source):
-    ##         sample = Sample(
-    ##                 sepal_length=float(row["sepal_length"]),
-    ##                 sepal_width=float(row["sepal_width"]),
-    ##                 petal_length=float(row["petal_length"]),
-    ##                 petal_width=float(row["petal_width"]),
-    ##                 species=row["species"],
-    ##                 )
-    ##         if n % 5 == 0:
-    ##             self.testing.append(sample)
-    ##         else:
-    ##             self.training.append(sample)
+    ##         raw_data_iter: Iterable[dict[str, str]]
+    ## ) -> None:
+    ##     """Extract TestingKnownSample and TrainingKnownSample from raw data"""
+    ##     bad_count = 0
+    ##     for n, row in enumerate(raw_data_iter):
+    ##         try:
+    ##             if n % 5 == 0:
+    ##                 test = TestingKnownSample.from_dict(row)
+    ##                 self.testing.append(test)
+    ##             else:
+    ##                 train = TrainingKnownSample.from_dict(row)
+    ##                 self.training.append(train)
+    ##         except InvalidSampleError as ex:
+    ##             print(f"Row {n+1}: {ex}")
+    ##             bad_count += 1
+    ##     if bad_count != 0:
+    ##         print(f"{bad_count} invalid rows")
+    ##         return
     ##     self.uploaded = datetime.datetime.now(tz=datetime.timezone.utc)
+    
     def load(
             self,
-            raw_data_iter: Iterable[dict[str, str]]
+            raw_data_iter: Iterable[dict[str,str]]
     ) -> None:
         """Extract TestingKnownSample and TrainingKnownSample from raw data"""
-        bad_count = 0
         for n, row in enumerate(raw_data_iter):
-            try:
-                if n % 5 == 0:
-                    test = TestingKnownSample.from_dict(row)
-                    self.testing.append(test)
-                else:
-                    train = TrainingKnownSample.from_dict(row)
-                    self.training.append(train)
-            except InvalidSampleError as ex:
-                print(f"Row {n+1}: {ex}")
-                bad_count += 1
-        if bad_count != 0:
-            print(f"{bad_count} invalid rows")
-            return
+            purpose = Purpose.Testing if n % 5 == 0 else Purpose.Training
+            sample = KnownSample(
+                    sepal_length=float(row["sepal_length"]),
+                    sepal_width=float(row["sepal_width"]),
+                    petal_length=float(row["petal_length"]),
+                    petal_width=float(row["petal_width"]),
+                    purpose=purpose,
+                    species=row["species"],
+            )
+            if sample.purpose == Purpose.Testing:
+                self.testing.append(sample)
+            else:
+                self.training.append(sample)
         self.uploaded = datetime.datetime.now(tz=datetime.timezone.utc)
 
     def test(
@@ -447,19 +450,38 @@ class TrainingData:
         self.tuning.append(parameter)
         self.tested = datetime.datetime.now(tz=datetime.timezone.utc)
 
-    ## def classify(
-    ##         self,
-    ##         parameter: Hyperparameter,
-    ##         sample: Sample) -> Sample:
-    ##     """Classify this Sample."""
-    ##     classification = parameter.classify(sample)
-    ##     sample.classify(classification)
-    ##     return sample
     def classify(
             self,
             parameter: Hyperparameter,
             sample: UnknownSample
-    ) -> ClassifiedSample:
-        return ClassifiedSample(
-                classification=parameter.classify(sample), sample=sample
-        )
+    ) -> str:
+        return parameter.classify(sample)
+
+class BadSampleRow(ValueError):
+    pass
+
+class SampleReader:
+    """
+    See iris.names for attribute ordering in bezdekIris.data file
+    """
+    target_class = Sample
+    header = ["sepal_length", "sepal_width", "petal_length", "petal_width", "class"]
+
+    def __init__(self, source: Path) -> None:
+        self.source = source
+
+    def sample_iter(self) -> Iterator[Sample]:
+        target_class = self.target_class
+        with self.source.open() as source_file:
+            reader = csv.DictReader(source_file, self.header)
+            for row in reader:
+                try:
+                    sample = target_class(
+                            sepal_length=float(row['sepal_length']),
+                            sepal_width=float(row['sepal_width']),
+                            petal_length=float(row['petal_length']),
+                            petal_width=float(row['petal_width']),
+                    )
+                except ValueError as ex:
+                    raise BadSampleRow(f'invalid {row!r}') from ex
+                yield sample
